@@ -1,0 +1,37 @@
+platforms:
+  # Maps "@tab_toolchains//bazel/platforms:x86_windows" to "--cpu=x86_windows".
+  @tab_toolchains//bazel/platforms:x86_windows
+    --cpu=x86_windows
+
+  # Maps "@tab_toolchains//bazel/platforms:x64_windows" to "--cpu=x64_windows".
+  @tab_toolchains//bazel/platforms:x64_windows
+    --cpu=x64_windows
+
+  @tab_toolchains//bazel/platforms:emscripten
+    --cpu=asmjs
+
+  @tab_toolchains//bazel/platforms:osx
+    --cpu=darwin
+
+  @tab_toolchains//bazel/platforms:linux
+    --cpu=k8
+
+
+flags:
+  # Maps "--cpu=x86_windows" to "@tab_toolchains//bazel/platforms:x86_windows".
+  --cpu=x86_windows
+    @tab_toolchains//bazel/platforms:x86_windows
+
+  # Maps "--cpu=x64_windows" to "@tab_toolchains//bazel/platforms:x64_windows".
+  --cpu=x64_windows
+    @tab_toolchains//bazel/platforms:x64_windows
+
+  --cpu=asmjs
+    @tab_toolchains//bazel/platforms:emscripten
+
+  --cpu=darwin
+    @tab_toolchains//bazel/platforms:osx
+
+  --cpu=k8
+    @tab_toolchains//bazel/platforms:linux
+

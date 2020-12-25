@@ -1,0 +1,165 @@
+# startup --host_jvm_args=-Xmx8g
+startup --windows_enable_symlinks
+
+# For console color=yes by default, but forcing it here makes it work for TeamCity build log too.
+common:teamcity --color=yes
+
+# https://docs.bazel.build/versions/master/command-line-reference.html#flag--enable_platform_specific_config
+common --enable_platform_specific_config=true
+
+build --action_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1
+build --action_env=TAB_SKIP_SITECUSTOMIZE=1
+
+# Moving Bazel build root folder to the location excluded from Sophos on access scans. List of the current Sophos
+# exclusions is here:
+#       https://mytableau.tableaucorp.com/display/ITEmployees/Sophos+Central+-+Threat+Protection+Scanning+Exclusions+Change+Tracking
+#
+# Since your repo should be in a Sophos-excluded directory, `..` is a safe bet and it works on all platforms.
+startup --output_user_root=../_bazel
+build --disk_cache=../_bazel/disk_cache
+
+# Experimental remote caching. 
+# Commented out for now (4/2/2020) because it causes intermittent error like:
+#       "SEVERE: onError: io.grpc.StatusRuntimeException: CANCELLED: cancelled before receiving half close" in TC.
+# build --remote_cache=grpc://bazelserver.tsi.lan:2020
+
+# The maximum number of seconds to wait for remote execution and cache calls. For the REST cache, this is both the connect and the read timeout.
+# build --remote_timeout=10
+# This option effectively disables both remote cache and local disk_cache. Issue opened: https://github.com/bazelbuild/bazel/issues/11631
+# build --remote_upload_local_results=false
+# build:teamcity --remote_upload_local_results=true
+# build --incompatible_remote_results_ignore_disk # See https://github.com/bazelbuild/bazel/issues/11631
+
+
+# To reduce clutter and make the build look closer to Lego move convenience shortcuts to ".build" subfolder.
+build --symlink_prefix=.build/
+build --experimental_no_product_name_out_symlink
+
+build --platform_mappings=bazel/platforms/platform_mappings
+
+# On dev machines we build without the sandbox as for some people on Linux and Mac it causes unexplained ten-fold performance degradation.
+build --spawn_strategy=local
+# In CI we restore the default strategy, which is "remote,worker,sandboxed,local"
+build:teamcity --spawn_strategy=""
+
+# This effectively turns off legacy toolchain resolution mechanism. With this we can 
+# 1. use BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1 
+# 2. not use Hyper bzl.py which sets --crosstool_top differently per platform.
+build --crosstool_top=@tab_toolchains//bazel/toolchains/dummy:dummy_toolchain_suite 
+
+build --compilation_mode dbg
+
+# This option demotes visibility checks to warnings.
+build --nocheck_visibility
+
+# Disable sandbox for C and CPP linking actions on MacOS.
+# MacOS linker stores debug symbols in binaries as links to the object files. 
+# When linker runs in the sandbox those paths do not make sense after linker finishes
+# and sandbox is destroyed. This makes debug symbols in binaries unusable.
+# Read additional comments here: https://milen.me/writings/apple-linker-ld64-deterministic-builds-oso-prefix/
+# In Xcode 11, Apple added a new linker option, -oso_prefix, that can relativise OSO absolute paths. Using that option may allow us to sandbox MacOS linking.
+
+# This statement disables sandbox on Mac for the linking action in built-in rules, such as cc_binary. 
+# It uses regexp over the "action description" which I still don't have an idea what it is and why it is this string.
+build:macos --strategy_regexp=^Linking=local
+# This statement disables sandbox on Mac for the linking action in custom rules, such as tab_cc_shared_library_internal.
+# It goes by the action mnemonic string.
+build:macos --strategy=CppLink=local
+
+# We had to match Monolith and use very old version of Protobuf: 3.6.0 In that version build uses genrule which in turn requires Bash.
+# As we already have an explicit dependency on Git we may as well utilize Bash which comes with it. 
+# This workaround is for Windows only and is not needed for the newer versions of Protobuf, unless somebody uses genrule (or Bash) for something else.
+build:windows --shell_executable="C:/Program Files/Git/usr/bin/bash.exe"
+
+# A couple useful options for test.
+test --test_output=errors
+
+# https://docs.bazel.build/versions/master/command-line-reference.html#flag--test_timeout
+# Default is 60, 300, 900, 3600
+# Let's not touch default test_timeout for now. It does not help resolve test_tabsys long running test problem, but instead causes frequent 
+#   "INFO: Build option --test_timeout has changed, discarding analysis cache."
+# test --test_timeout=180,-1,-1,-1
+
+# This enables running cquery on test_suite, but disables negative (exclusion) test patterns.
+# https://github.com/bazelbuild/bazel/issues/11042
+test --noexpand_test_suites
+
+# Show the command progress in the terminal title. Useful to see what bazel is doing when having multiple terminal tabs.
+build --progress_in_terminal_title
+
+# Whether to make direct file system calls to create symlink trees
+build --experimental_inprocess_symlink_creation
+
+# This supposed to enable pic_objects and objects parameters for cc_common.create_library_to_link, but I could not get it to work.
+build --experimental_starlark_cc_import
+
+# This enables always requested output group named "_validation".
+build --experimental_run_validations
+
+query --notool_deps --noimplicit_deps
+# cquery inherits "query" options
+# aquery inherits "build" options
+
+# Make sure we are not requesting targets which Emscripten is not capable of building.
+# Commented out to get rid of the confusing console output.
+# build --aspects @tab_toolchains//bazel/aspects:target_platform_validation_aspect.bzl%target_platform_validation_aspect
+
+# This is how we find all incompatible flags: https://mytableau.tableaucorp.com/pages/viewpage.action?pageId=376966304
+build --incompatible_allow_tags_propagation
+build --noincompatible_blacklisted_protos_requires_proto_info #  Broken in Google's Protobuf 3.12.3. We need to remove this line when we update to the fresh Protobuf.
+build --incompatible_default_to_explicit_init_py
+build --incompatible_disable_depset_items
+build --incompatible_disable_target_provider_fields
+# build --incompatible_disallow_empty_glob #  Cannot enable this because of gRPC C++
+# build --incompatible_disallow_struct_provider_syntax # This one is broken in Bazel 3.7.2. See https://github.com/bazelbuild/bazel/issues/7347#issuecomment-607933160 
+build --incompatible_do_not_split_linking_cmdline
+build --incompatible_enable_cc_toolchain_resolution #  This flag is REQUIRED for the Blitz C++ build to work.
+build --incompatible_force_strict_header_check_from_starlark # Defaults to false in 3.7.2, flipped to true in 4.0
+build --incompatible_java_common_parameters
+build --incompatible_linkopts_to_linklibs
+build --incompatible_no_implicit_file_export
+# build --incompatible_no_rule_outputs_param #  Cannot enable this because of gRPC C++
+build --incompatible_objc_compile_info_migration
+build --incompatible_objc_provider_remove_compile_info
+build --noincompatible_override_toolchain_transition #  See https://github.com/bazelbuild/bazel/issues/11993
+# build --incompatible_use_platforms_repo_for_constraints #  Cannot enable this because of gRPC C++
+# build --incompatible_require_linker_input_cc_api #  Cannot enable this because of gRPC C++
+build --incompatible_restrict_string_escapes
+build --incompatible_run_shell_command_string
+build --incompatible_strict_action_env
+build --incompatible_string_replace_count
+build --incompatible_use_cc_configure_from_rules_cc
+build --incompatible_visibility_private_attributes_at_definition
+
+# This creates "force_pic" build variable, which is then checked by the toolchain code here:
+# https://gitlab.tableausoftware.com/tableaubuild/bazel/tab_toolchains/-/blob/master/bazel/toolchains/clang/clang_posix_toolchain_config_base.bzl#L948
+build:macos --force_pic
+build:linux --force_pic
+
+# Here we wire up .bazelrc fragment we dedicated to repository overrides.
+try-import %workspace%/bazel/bazelrc-repository-overrides
+
+# This translates Bazel configuration name "fastbuild", which may be set in another .bazelrc file, to the actual Bazel built-in compilation_mode.
+build:fastbuild --compilation_mode fastbuild
+
+################################################################################################################
+# Disabled (but potentially useful) options go down below.
+
+# This helps with debugging Linux and OSX builds in sandbox
+# build --sandbox_debug
+
+# build --experimental_execution_log_file=C:/1/basel_execution_log.txt
+# build --explain=C:/1/bazel_explain.txt
+# build --verbose_explanations
+
+# common --announce_rc
+# build -s 
+
+# This is the default
+# common --curses=yes
+
+# This is to work on toolchains.
+# build --toolchain_resolution_debug
+
+# Commented out as we are not currently using it.
+# import %workspace%/bazel/workspace_status/workspace_status_command.bazelrc

@@ -1,0 +1,6 @@
+load("@tab_toolchains//cc:defs.bzl", "tab_cc_library")
+
+tab_cc_library(
+    name = 'hello-lib',
+    srcs = ['hello-lib.cc'],
+)
